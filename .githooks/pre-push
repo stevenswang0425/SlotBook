@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Block pushes that update remote main/master.
+# Use a PR:  push your branch, then:  gh pr create --base main
+
+set -euo pipefail
+
+protected_pattern='^(main|master)$'
+
+# stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip deletes
+  if [[ "$local_sha" == "0000000000000000000000000000000000000000" ]]; then
+    continue
+  fi
+
+  remote_branch="${remote_ref#refs/heads/}"
+
+  if [[ "$remote_branch" =~ $protected_pattern ]]; then
+    cat >&2 <<EOF
+ERROR: Direct push to remote branch '$remote_branch' is blocked.
+
+  Push a feature branch instead, then merge via pull request:
+    git push -u origin HEAD
+    gh pr create --base main
+
+To bypass only in a real emergency (not recommended):
+  git push --no-verify
+EOF
+    exit 1
+  fi
+done
+
+exit 0
