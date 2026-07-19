@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Block commits directly on protected branches (main/master).
+# Work on a feature branch, then open a PR into main.
+
+set -euo pipefail
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+
+if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+  cat >&2 <<'EOF'
+ERROR: Direct commits to 'main' (or 'master') are blocked.
+
+  1. Create/switch to a branch:  git checkout -b feature/your-change
+  2. Commit on that branch
+  3. Push and open a PR into main
+
+To bypass only in a real emergency (not recommended):
+  git commit --no-verify
+EOF
+  exit 1
+fi
+
+exit 0
