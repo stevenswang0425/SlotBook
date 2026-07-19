@@ -12,6 +12,7 @@ struct SlotBookApp: App {
     @State private var bookingStore = BookingStore()
     @State private var appNavigation = AppNavigation()
     @State private var themeManager = ThemeManager()
+    @State private var userSession = UserSession()
     @State private var repositories = RepositoryContainer.makeDefault()
     @State private var realtimeSimulator: RealtimeAvailabilitySimulator?
     @State private var showSplash = true
@@ -23,6 +24,7 @@ struct SlotBookApp: App {
                     .themeManager(themeManager)
                     .bookingStore(bookingStore)
                     .appNavigation(appNavigation)
+                    .userSession(userSession)
                     .repositories(repositories)
                     // Rebuild chrome when brand palette changes so tint / accents update.
                     .id(themeManager.preset)

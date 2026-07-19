@@ -2,7 +2,7 @@
 //  MainTabView.swift
 //  SlotBook
 //
-//  Root tab navigation: Home, My Bookings, Profile.
+//  Root tabs: Home, (My Store when owner), My Bookings, Profile.
 //
 
 import SwiftUI
@@ -11,6 +11,7 @@ struct MainTabView: View {
     @Environment(\.appNavigation) private var appNavigation
     @Environment(\.themeManager) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.userSession) private var userSession
 
     var body: some View {
         TabView(selection: tabSelection) {
@@ -19,6 +20,14 @@ struct MainTabView: View {
                     Label("Home", systemImage: "square.grid.2x2.fill")
                 }
                 .tag(AppTab.home)
+
+            if userSession.isOwner {
+                AdminStoreView()
+                    .tabItem {
+                        Label("My Store", systemImage: "building.2.fill")
+                    }
+                    .tag(AppTab.admin)
+            }
 
             MyBookingsView()
                 .tabItem {
@@ -33,6 +42,12 @@ struct MainTabView: View {
                 .tag(AppTab.profile)
         }
         .tint(themeManager.preset.primary(for: colorScheme))
+        // If the user signs out while on Admin, bounce to Home.
+        .onChange(of: userSession.isOwner) { _, isOwner in
+            if !isOwner, appNavigation.selectedTab == .admin {
+                appNavigation.openHome()
+            }
+        }
     }
 
     private var tabSelection: Binding<AppTab> {
@@ -43,20 +58,29 @@ struct MainTabView: View {
     }
 }
 
-#Preview("Tabs — Light") {
+#Preview("Tabs — Owner") {
+    let session = UserSession()
+    session.becomeStoreOwner(
+        StoreOwnerSignup(
+            storeName: "Harbor Collective",
+            phone: "(555) 010-2000",
+            email: nil,
+            serviceDescription: nil
+        )
+    )
+    return MainTabView()
+        .themeManager(ThemeManager())
+        .bookingStore(BookingStore())
+        .appNavigation(AppNavigation())
+        .userSession(session)
+        .repositories(.makeDefault())
+}
+
+#Preview("Tabs — Guest") {
     MainTabView()
         .themeManager(ThemeManager())
         .bookingStore(BookingStore())
         .appNavigation(AppNavigation())
+        .userSession(UserSession())
         .repositories(.makeDefault())
-}
-
-#Preview("Tabs — Forest Dark") {
-    let tm = ThemeManager()
-    tm.apply(.forest)
-    return MainTabView()
-        .themeManager(tm)
-        .bookingStore(BookingStore())
-        .appNavigation(AppNavigation())
-        .preferredColorScheme(.dark)
 }

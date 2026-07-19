@@ -9,9 +9,10 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// Root tab identifiers shared by MainTabView and deep links (e.g. post-booking).
+/// Root tab identifiers shared by MainTabView and deep links.
 enum AppTab: Hashable, Sendable {
     case home
+    case admin
     case bookings
     case profile
 }
@@ -28,6 +29,14 @@ final class AppNavigation {
 
     func openHome() {
         selectedTab = .home
+    }
+
+    func openAdmin() {
+        selectedTab = .admin
+    }
+
+    func openProfile() {
+        selectedTab = .profile
     }
 }
 
