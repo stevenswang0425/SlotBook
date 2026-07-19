@@ -1,0 +1,11 @@
+# Minimal Supabase CLI config for SlotBook.
+# Full options: https://supabase.com/docs/guides/cli/config
+
+[project]
+# Set after `supabase link`
+
+[db]
+major_version = 15
+
+[api]
+enabled = true

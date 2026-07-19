@@ -41,3 +41,19 @@ Temporary Items
 *.swp
 *~
 .grok/
+
+# Node / Next.js
+node_modules/
+web/node_modules/
+web/.next/
+web/out/
+web/.env
+web/.env.local
+web/.env*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Supabase CLI local
+supabase/.branches
+supabase/.temp
