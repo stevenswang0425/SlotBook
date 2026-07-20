@@ -2,8 +2,8 @@
 //  HomeView.swift
 //  SlotBook
 //
-//  Items list: logo, real-time search, filter chips, responsive grid,
-//  skeleton loading, pull-to-refresh, and navigation to item detail.
+//  Discover — badminton club list with search, filters, grid, empty states.
+//  Iteration 2: filter chips + richer cards + polished empty / loading UX.
 //
 
 import SwiftUI
@@ -13,18 +13,18 @@ struct HomeView: View {
     @Environment(\.themeManager) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.repositories) private var repositories
-    @State private var viewModel: HomeViewModel?
 
-    /// Responsive grid: adapts column count on wider devices.
+    @State private var viewModel: DiscoverViewModel?
+
+    /// Adaptive grid — two columns on phone portrait, wider cards on iPad.
     private let columns = [
-        GridItem(.adaptive(minimum: 156, maximum: 280), spacing: Spacing.md),
+        GridItem(.adaptive(minimum: 160, maximum: 420), spacing: Spacing.md),
     ]
 
     var body: some View {
         NavigationStack {
             ZStack {
-                SBColor.background
-                    .ignoresSafeArea()
+                SBColor.background.ignoresSafeArea()
 
                 if let viewModel {
                     content(viewModel)
@@ -39,14 +39,15 @@ struct HomeView: View {
             .searchable(
                 text: searchBinding,
                 placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search items"
+                prompt: "Search by name or address"
             )
-            .navigationDestination(for: Item.self) { item in
-                ItemDetailView(item: item)
+            .navigationDestination(for: BadmintonClub.self) { club in
+                // Pass club into detail VM (repository from environment).
+                ClubDetailView(club: club)
             }
             .task {
                 if viewModel == nil {
-                    viewModel = HomeViewModel(itemRepository: repositories.items)
+                    viewModel = DiscoverViewModel(clubRepository: repositories.clubs)
                 }
                 await viewModel?.load()
             }
@@ -64,9 +65,9 @@ struct HomeView: View {
 
     private var logo: some View {
         HStack(spacing: Spacing.xs) {
-            Image(systemName: brandTheme.logoSymbol)
+            Image(systemName: "figure.badminton")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(themeManager.preset.primary(for: colorScheme))
+                .foregroundStyle(themeManager.primary(for: colorScheme))
                 .symbolRenderingMode(.hierarchical)
 
             Text(brandTheme.appName)
@@ -79,49 +80,59 @@ struct HomeView: View {
     // MARK: - Content
 
     @ViewBuilder
-    private func content(_ viewModel: HomeViewModel) -> some View {
+    private func content(_ viewModel: DiscoverViewModel) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                CategoryFilterBar(
-                    categories: viewModel.categories,
-                    selected: viewModel.selectedCategory,
-                    onSelect: { category in
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                            viewModel.selectCategory(category)
-                        }
-                    }
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                intro
+
+                ClubFilterBar(
+                    filters: viewModel.filters,
+                    selected: viewModel.selectedFilter,
+                    onSelect: { viewModel.selectFilter($0) }
                 )
-                .padding(.top, Spacing.xs)
+                .animation(.easeInOut(duration: 0.2), value: viewModel.selectedFilter)
 
                 if viewModel.showsSkeleton {
                     skeletonGrid
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                        .transition(.opacity)
                 } else if let error = viewModel.loadError {
                     EmptyStateView(
                         systemImage: "wifi.exclamationmark",
-                        title: "Couldn't load experiences",
+                        title: "Couldn't load clubs",
                         message: error,
                         actionTitle: "Try again",
-                        action: {
-                            Task { await viewModel.refresh() }
-                        }
+                        action: { Task { await viewModel.refresh() } }
                     )
-                    .padding(.top, Spacing.xxl)
-                    .transition(.opacity)
+                    .padding(.top, Spacing.lg)
                 } else if viewModel.isEmpty {
-                    emptyState(viewModel)
-                        .padding(.top, Spacing.xxl)
-                        .transition(.opacity)
+                    EmptyStateView(
+                        systemImage: viewModel.isFilterEmpty
+                            ? "magnifyingglass"
+                            : "sportscourt",
+                        title: "No clubs found",
+                        message: viewModel.isFilterEmpty
+                            ? "Try another name, address, or clear filters."
+                            : "Clubs will appear here when available.",
+                        actionTitle: viewModel.isFilterEmpty ? "Clear filters" : nil,
+                        action: viewModel.isFilterEmpty
+                            ? { viewModel.clearFilters() }
+                            : nil
+                    )
+                    .padding(.top, Spacing.lg)
                 } else {
-                    itemGrid(viewModel)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    if !viewModel.resultsCountLabel.isEmpty {
+                        Text(viewModel.resultsCountLabel)
+                            .sbFontCaption()
+                            .padding(.horizontal, Spacing.xl)
+                            .accessibilityLabel(viewModel.resultsCountLabel)
+                    }
+                    clubGrid(viewModel)
                 }
             }
             .padding(.bottom, Spacing.xxl)
-            .animation(.easeInOut(duration: 0.28), value: viewModel.selectedCategory)
             .animation(.easeInOut(duration: 0.28), value: viewModel.searchText)
+            .animation(.easeInOut(duration: 0.28), value: viewModel.selectedFilter)
             .animation(.easeInOut(duration: 0.35), value: viewModel.showsSkeleton)
-            .animation(.easeInOut(duration: 0.28), value: viewModel.isEmpty)
         }
         .scrollDismissesKeyboard(.interactively)
         .refreshable {
@@ -129,22 +140,26 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Grids
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text("Discover clubs")
+                .sbFontHeadline()
+            Text("Book badminton courts across the GTA.")
+                .sbFontCaption()
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.top, Spacing.sm)
+        .accessibilityElement(children: .combine)
+    }
 
-    private func itemGrid(_ viewModel: HomeViewModel) -> some View {
+    private func clubGrid(_ viewModel: DiscoverViewModel) -> some View {
         LazyVGrid(columns: columns, spacing: Spacing.md) {
-            ForEach(viewModel.filteredItems) { item in
-                NavigationLink(value: item) {
-                    ItemCardView(item: item)
+            ForEach(viewModel.filteredClubs) { club in
+                NavigationLink(value: club) {
+                    // Expanded body when the adaptive column is wide enough feels roomier.
+                    ClubCardView(club: club, expanded: true)
                 }
-                .buttonStyle(CardPressStyle())
-                .accessibilityHint("Opens details and available times")
-                .transition(
-                    .asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.96)),
-                        removal: .opacity
-                    )
-                )
+                .buttonStyle(DiscoverCardPressStyle())
             }
         }
         .padding(.horizontal, Spacing.xl)
@@ -152,53 +167,69 @@ struct HomeView: View {
 
     private var skeletonGrid: some View {
         LazyVGrid(columns: columns, spacing: Spacing.md) {
-            ForEach(0..<4, id: \.self) { _ in
-                ItemCardSkeleton()
+            ForEach(0..<3, id: \.self) { _ in
+                ClubCardSkeleton()
             }
         }
         .padding(.horizontal, Spacing.xl)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Loading experiences")
-    }
-
-    // MARK: - Empty
-
-    private func emptyState(_ viewModel: HomeViewModel) -> some View {
-        EmptyStateView(
-            systemImage: "magnifyingglass",
-            title: "No matches",
-            message: "Try another category or clear your search.",
-            actionTitle: "Clear filters",
-            action: {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    viewModel.clearFilters()
-                }
-            }
-        )
-        .padding(.horizontal, Spacing.xl)
+        .accessibilityLabel("Loading clubs")
     }
 }
 
-// MARK: - Card press style
+// MARK: - Skeleton
 
-/// Subtle scale on press for navigable cards.
-private struct CardPressStyle: ButtonStyle {
+private struct ClubCardSkeleton: View {
+    var body: some View {
+        CardView(padding: 0, cornerRadius: Radius.lg) {
+            VStack(alignment: .leading, spacing: 0) {
+                RoundedRectangle(cornerRadius: 0)
+                    .fill(SBColor.chipBackground)
+                    .frame(height: 148)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(SBColor.chipBackground)
+                        .frame(height: 16)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(SBColor.chipBackground)
+                        .frame(width: 140, height: 12)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(SBColor.chipBackground)
+                        .frame(height: 28)
+                    HStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(SBColor.chipBackground)
+                            .frame(width: 72, height: 22)
+                        Spacer()
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(SBColor.chipBackground)
+                            .frame(width: 48, height: 12)
+                    }
+                }
+                .padding(Spacing.md)
+            }
+        }
+        .redacted(reason: .placeholder)
+    }
+}
+
+private struct DiscoverCardPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.easeInOut(duration: 0.16), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 
 // MARK: - Previews
 
-#Preview("Home — Light") {
+#Preview("Discover — Light") {
     HomeView()
         .themeManager(ThemeManager())
         .repositories(.makeDefault())
 }
 
-#Preview("Home — Dark") {
+#Preview("Discover — Dark") {
     HomeView()
         .themeManager(ThemeManager())
         .repositories(.makeDefault())

@@ -17,7 +17,7 @@ struct MainTabView: View {
         TabView(selection: tabSelection) {
             HomeView()
                 .tabItem {
-                    Label("Home", systemImage: "square.grid.2x2.fill")
+                    Label("Discover", systemImage: "sportscourt.fill")
                 }
                 .tag(AppTab.home)
 

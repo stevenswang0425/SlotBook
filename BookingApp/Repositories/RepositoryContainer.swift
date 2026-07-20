@@ -16,14 +16,20 @@ import SwiftUI
 final class RepositoryContainer {
     let items: any ItemRepository
     let bookings: any BookingRepository
+    let clubs: any ClubRepository
+    let adminClubs: any AdminClubRepository
 
     /// Production MVP defaults — mock implementations.
     init(
         items: any ItemRepository = MockItemRepository(),
-        bookings: any BookingRepository = MockBookingRepository()
+        bookings: any BookingRepository = MockBookingRepository(),
+        clubs: any ClubRepository = MockClubRepository(),
+        adminClubs: any AdminClubRepository = MockAdminClubRepository.shared
     ) {
         self.items = items
         self.bookings = bookings
+        self.clubs = clubs
+        self.adminClubs = adminClubs
     }
 
     /// Example factory for a future Supabase build configuration.
@@ -32,7 +38,9 @@ final class RepositoryContainer {
     /// // #if SUPABASE
     /// // return RepositoryContainer(
     /// //     items: SupabaseItemRepository(client: client),
-    /// //     bookings: SupabaseBookingRepository(client: client)
+    /// //     bookings: SupabaseBookingRepository(client: client),
+    /// //     clubs: SupabaseClubRepository(client: client),
+    /// //     adminClubs: SupabaseAdminClubRepository(client: client)
     /// // )
     /// // #endif
     /// ```

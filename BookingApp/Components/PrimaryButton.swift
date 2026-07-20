@@ -38,7 +38,8 @@ struct PrimaryButton: View {
                     cornerRadius: Radius.md * brandTheme.cornerRadiusScale,
                     style: .continuous
                 )
-                .fill(themeManager.preset.primary(for: colorScheme))
+                // Respects club primary override when browsing a club.
+                .fill(themeManager.primary(for: colorScheme))
             )
         }
         .buttonStyle(SBPressableButtonStyle())
@@ -64,7 +65,7 @@ struct SecondaryButton: View {
                 .sbFontButton()
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 52)
-                .foregroundStyle(themeManager.preset.primary(for: colorScheme))
+                .foregroundStyle(themeManager.primary(for: colorScheme))
                 .background(
                     RoundedRectangle(
                         cornerRadius: Radius.md * brandTheme.cornerRadiusScale,

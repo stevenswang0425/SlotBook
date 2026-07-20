@@ -53,7 +53,8 @@ struct DayChip: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let primary = themeManager.preset.primary(for: colorScheme)
+        // Respects club primary override when browsing a club.
+        let primary = themeManager.primary(for: colorScheme)
 
         Button(action: action) {
             VStack(spacing: Spacing.xxs) {

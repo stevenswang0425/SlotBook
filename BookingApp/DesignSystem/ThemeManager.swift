@@ -54,6 +54,10 @@ final class ThemeManager {
         }
     }
 
+    /// When set (e.g. inside a club detail), overrides global preset primary.
+    /// Cleared when leaving club-scoped UI. Not persisted.
+    var clubPrimaryOverride: Color?
+
     /// Convenience snapshot.
     var appTheme: AppTheme {
         AppTheme(preset: preset, colorSchemeOverride: colorSchemeOverride)
@@ -77,6 +81,7 @@ final class ThemeManager {
 
     func apply(_ preset: ThemePreset) {
         self.preset = preset
+        clubPrimaryOverride = nil
         HapticFeedback.selection()
     }
 
@@ -85,9 +90,30 @@ final class ThemeManager {
         HapticFeedback.selection()
     }
 
-    /// Primary color resolved for a given scheme (for previews / non-view code).
+    /// Apply a club’s brand primary while browsing that club (Iteration 1+).
+    func applyClubTheme(_ club: BadmintonClub) {
+        clubPrimaryOverride = club.primaryColor.swiftUIColor
+    }
+
+    /// Restore global brand primary after leaving club-scoped screens.
+    func clearClubTheme() {
+        clubPrimaryOverride = nil
+    }
+
+    /// Primary color resolved for a given scheme (club override wins when set).
     func primary(for scheme: ColorScheme) -> Color {
-        preset.primary(for: scheme)
+        if let clubPrimaryOverride {
+            return clubPrimaryOverride
+        }
+        return preset.primary(for: scheme)
+    }
+
+    /// Soft wash for chips / badges — derived from club override when present.
+    func primaryMuted(for scheme: ColorScheme) -> Color {
+        if clubPrimaryOverride != nil {
+            return primary(for: scheme).opacity(scheme == .dark ? 0.28 : 0.16)
+        }
+        return preset.primaryMuted(for: scheme)
     }
 }
 

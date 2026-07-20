@@ -9,7 +9,7 @@ import SwiftUI
 
 struct AdminItemCalendarView: View {
     let service: AdminService
-    @Bindable var viewModel: AdminStoreViewModel
+    @Bindable var viewModel: MarketplaceAdminStoreViewModel
 
     @Environment(\.themeManager) private var themeManager
     @Environment(\.colorScheme) private var colorScheme
@@ -271,7 +271,7 @@ struct AdminItemCalendarView: View {
 // MARK: - Previews
 
 #Preview("Calendar") {
-    let vm = AdminStoreViewModel()
+    let vm = MarketplaceAdminStoreViewModel()
     vm.load()
     return NavigationStack {
         AdminItemCalendarView(service: MockAdminData.services[1], viewModel: vm)

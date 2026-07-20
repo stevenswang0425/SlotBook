@@ -2,8 +2,8 @@
 //  AdminStoreViewModel.swift
 //  SlotBook
 //
-//  Owner admin: services list, week calendar slots, cancel booking.
-//  Mock-backed; swap loaders for Supabase later.
+//  Owner “My Store” hub for badminton clubs: list, utilization, bookings.
+//  Mock-backed via AdminClubRepository + BookingStore.
 //
 
 import Foundation
@@ -12,106 +12,171 @@ import Observation
 @Observable
 @MainActor
 final class AdminStoreViewModel {
-    private(set) var services: [AdminService] = []
-    private(set) var slotsByService: [UUID: [AdminSlotOccurrence]] = [:]
+
+    // MARK: - State
+
+    private(set) var clubs: [AdminManagedClub] = []
+    private(set) var courtsByClub: [UUID: [AdminManagedCourt]] = [:]
     private(set) var isLoading = false
+    var loadError: String?
 
-    /// Monday (or locale first weekday) of the visible week.
-    var weekStart: Date
+    /// Club filter for unified bookings list (`nil` = all clubs).
+    var bookingsClubFilter: UUID?
+    var bookingsSegment: BookingsSegment = .upcoming
 
+    private(set) var now: Date = Date()
+
+    // MARK: - Dependencies
+
+    private let adminRepository: any AdminClubRepository
+    private weak var bookingStore: BookingStore?
     private let calendar: Calendar
 
-    init(calendar: Calendar = .current, now: Date = Date()) {
+    /// ~open hours for utilization capacity (matches engine 9–22).
+    private let openHoursPerDay: Double = 13
+
+    init(
+        adminRepository: any AdminClubRepository = MockAdminClubRepository.shared,
+        calendar: Calendar = .current
+    ) {
+        self.adminRepository = adminRepository
         self.calendar = calendar
-        self.weekStart = Self.startOfWeek(for: now, calendar: calendar)
+    }
+
+    func attach(store: BookingStore) {
+        bookingStore = store
+        // Seed demo court bookings if owner opens admin with empty store.
+        if store.courtBookings.isEmpty {
+            store.seedCourtPreviewData()
+        }
     }
 
     // MARK: - Derived
 
-    func slots(for serviceId: UUID) -> [AdminSlotOccurrence] {
-        slotsByService[serviceId] ?? []
+    func courts(for clubId: UUID) -> [AdminManagedCourt] {
+        courtsByClub[clubId] ?? []
     }
 
-    func slots(for serviceId: UUID, on day: Date) -> [AdminSlotOccurrence] {
-        let dayStart = calendar.startOfDay(for: day)
-        return slots(for: serviceId).filter {
-            calendar.isDate($0.start, inSameDayAs: dayStart)
+    func activeCourtCount(for clubId: UUID) -> Int {
+        courts(for: clubId).filter(\.isActive).count
+    }
+
+    func totalCourtCount(for clubId: UUID) -> Int {
+        courts(for: clubId).count
+    }
+
+    func utilization(for clubId: UUID) -> ClubUtilization {
+        guard let store = bookingStore else { return .zero }
+        let active = max(activeCourtCount(for: clubId), 1)
+        let dayStart = calendar.startOfDay(for: now)
+        let weekStart = Self.startOfWeek(for: now, calendar: calendar)
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? now
+
+        let clubBookings = store.courtBookings.filter {
+            $0.clubId == clubId && $0.status == .confirmed
+        }
+
+        let today = clubBookings.filter { calendar.isDate($0.start, inSameDayAs: dayStart) }
+        let week = clubBookings.filter { $0.start >= weekStart && $0.start < weekEnd }
+
+        let todayMinutes = today.reduce(0) { $0 + $1.durationMinutes }
+        let weekMinutes = week.reduce(0) { $0 + $1.durationMinutes }
+
+        let todayCapacity = Double(active) * openHoursPerDay * 60
+        let weekCapacity = todayCapacity * 7
+
+        return ClubUtilization(
+            today: min(1, Double(todayMinutes) / max(todayCapacity, 1)),
+            week: min(1, Double(weekMinutes) / max(weekCapacity, 1)),
+            todayBookingCount: today.count,
+            weekBookingCount: week.count
+        )
+    }
+
+    var allAdminBookings: [AdminCourtBookingRow] {
+        guard let store = bookingStore else { return [] }
+        var rows = store.courtBookings.map {
+            AdminCourtBookingRow.from($0, isGuest: true)
+        }
+        if let filter = bookingsClubFilter {
+            rows = rows.filter { $0.clubId == filter }
+        }
+        return rows
+    }
+
+    var displayedAdminBookings: [AdminCourtBookingRow] {
+        let rows = allAdminBookings
+        switch bookingsSegment {
+        case .upcoming:
+            return rows
+                .filter { $0.status == .confirmed && $0.end > now }
+                .sorted { $0.start < $1.start }
+        case .past:
+            return rows
+                .filter { $0.status != .confirmed || $0.end <= now }
+                .sorted { $0.start > $1.start }
         }
     }
 
-    func daysInWeek() -> [Date] {
-        (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
+    var clubFilterOptions: [(id: UUID?, name: String)] {
+        [(nil, "All clubs")] + clubs.map { ($0.id as UUID?, $0.name) }
     }
 
-    func bookingCount(for serviceId: UUID, on day: Date) -> Int {
-        slots(for: serviceId, on: day).filter(\.isBooked).count
-    }
+    // MARK: - Load
 
-    func weekBookingCount(for serviceId: UUID) -> Int {
-        slots(for: serviceId).filter(\.isBooked).count
-    }
-
-    var weekRangeLabel: String {
-        let end = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("MMMd")
-        return "\(f.string(from: weekStart)) – \(f.string(from: end))"
-    }
-
-    // MARK: - Intentions
-
-    func load() {
+    func load() async {
         isLoading = true
-        // FUTURE: fetch items where store_id = owner store via Supabase.
-        services = MockAdminData.services
-        rebuildSlots()
+        loadError = nil
+        now = Date()
+        do {
+            clubs = try await adminRepository.fetchManagedClubs()
+            var map: [UUID: [AdminManagedCourt]] = [:]
+            for club in clubs {
+                map[club.id] = try await adminRepository.fetchManagedCourts(clubId: club.id)
+            }
+            courtsByClub = map
+        } catch {
+            loadError = error.localizedDescription
+        }
         isLoading = false
     }
 
-    func goToPreviousWeek() {
-        if let next = calendar.date(byAdding: .day, value: -7, to: weekStart) {
-            weekStart = next
-            rebuildSlots()
-        }
+    func refresh() async {
+        now = Date()
+        await load()
     }
 
-    func goToNextWeek() {
-        if let next = calendar.date(byAdding: .day, value: 7, to: weekStart) {
-            weekStart = next
-            rebuildSlots()
-        }
+    // MARK: - Bookings
+
+    func selectBookingsFilter(_ clubId: UUID?) {
+        bookingsClubFilter = clubId
+        HapticFeedback.selection()
     }
 
-    func goToThisWeek() {
-        weekStart = Self.startOfWeek(for: Date(), calendar: calendar)
-        rebuildSlots()
+    func selectBookingsSegment(_ segment: BookingsSegment) {
+        guard bookingsSegment != segment else { return }
+        bookingsSegment = segment
+        HapticFeedback.selection()
     }
 
-    func cancelBooking(_ booking: AdminBooking) {
-        guard var list = slotsByService[booking.serviceId] else { return }
-        for i in list.indices {
-            if list[i].booking?.id == booking.id {
-                list[i].booking = nil // free the slot
-            }
+    @discardableResult
+    func cancelCourtBooking(id: UUID) -> Bool {
+        guard let store = bookingStore else { return false }
+        let result = store.cancelCourtBooking(id: id, at: Date())
+        if result != nil {
+            now = Date()
+            HapticFeedback.success()
+            return true
         }
-        slotsByService[booking.serviceId] = list
-        HapticFeedback.success()
+        HapticFeedback.error()
+        return false
     }
 
     // MARK: - Private
 
-    private func rebuildSlots() {
-        var map: [UUID: [AdminSlotOccurrence]] = [:]
-        for service in services {
-            // FUTURE: load time_slots + bookings for range from API.
-            map[service.id] = MockAdminData.slots(for: service, weekStart: weekStart, calendar: calendar)
-        }
-        slotsByService = map
-    }
-
     nonisolated private static func startOfWeek(for date: Date, calendar: Calendar) -> Date {
         var cal = calendar
-        cal.firstWeekday = 2 // Monday
+        cal.firstWeekday = 2
         let components = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
         return cal.date(from: components).map { cal.startOfDay(for: $0) }
             ?? cal.startOfDay(for: date)

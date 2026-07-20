@@ -2,7 +2,8 @@
 //  MyBookingsView.swift
 //  SlotBook
 //
-//  My Bookings tab: Upcoming / Past segments, cancel flow, empty states.
+//  My Bookings tab — Upcoming / Past, cards, detail navigation, cancel.
+//  Iteration 5: management polish + court detail + store-synced availability.
 //
 
 import SwiftUI
@@ -10,6 +11,7 @@ import SwiftUI
 struct MyBookingsView: View {
     @Environment(\.bookingStore) private var bookingStore
     @Environment(\.appNavigation) private var appNavigation
+    @Environment(\.themeManager) private var themeManager
     @State private var viewModel: BookingsViewModel?
 
     var body: some View {
@@ -20,12 +22,17 @@ struct MyBookingsView: View {
                 if let viewModel {
                     content(viewModel)
                 } else {
-                    // Brief placeholder while the view model attaches to the store.
                     Color.clear
                 }
             }
             .navigationTitle("My Bookings")
             .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(for: CourtBooking.self) { booking in
+                CourtBookingDetailView(
+                    bookingID: booking.id,
+                    viewModel: viewModel
+                )
+            }
             .onAppear {
                 if viewModel == nil {
                     viewModel = BookingsViewModel(store: bookingStore)
@@ -39,9 +46,10 @@ struct MyBookingsView: View {
 
     @ViewBuilder
     private func content(_ viewModel: BookingsViewModel) -> some View {
-        // Touch store properties so list re-renders when bookings change.
+        // Observe store mutations (book / cancel) for list refresh.
         let _ = bookingStore.bookings
-        let _ = bookingStore.reservedSlotIDs
+        let _ = bookingStore.courtBookings
+        let _ = bookingStore.reservationEpoch
 
         VStack(spacing: 0) {
             BookingsSegmentControl(
@@ -63,7 +71,10 @@ struct MyBookingsView: View {
             }
         }
         .animation(.easeInOut(duration: 0.28), value: viewModel.selectedSegment)
-        .animation(.spring(response: 0.36, dampingFraction: 0.86), value: viewModel.displayedBookings.map(\.id))
+        .animation(
+            .spring(response: 0.36, dampingFraction: 0.86),
+            value: listIdentity(viewModel)
+        )
         .overlay(alignment: .bottom) {
             if let message = viewModel.toastMessage {
                 ToastBanner(
@@ -77,24 +88,28 @@ struct MyBookingsView: View {
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: viewModel.toastMessage)
         .alert(
-            "Cancel booking?",
+            viewModel.cancelAlertTitle,
             isPresented: cancelAlertBinding(viewModel)
         ) {
             Button("Keep booking", role: .cancel) {
                 viewModel.dismissCancelConfirmation()
             }
             Button("Cancel booking", role: .destructive) {
-                Task {
-                    await viewModel.confirmCancel()
-                }
+                Task { await viewModel.confirmCancel() }
             }
         } message: {
-            if let booking = viewModel.bookingPendingCancel {
-                Text(
-                    "\(booking.item.name) on \(booking.dateTimeLabel()) will be cancelled and the time slot will become available again."
-                )
-            }
+            Text(viewModel.cancelAlertMessage)
         }
+    }
+
+    private func listIdentity(_ viewModel: BookingsViewModel) -> String {
+        let court = viewModel.displayedCourtBookings.map {
+            "\($0.id.uuidString):\($0.status.rawValue)"
+        }.joined(separator: ",")
+        let market = viewModel.displayedBookings.map {
+            "\($0.id.uuidString):\($0.status.rawValue)"
+        }.joined(separator: ",")
+        return court + "|" + market
     }
 
     // MARK: - List
@@ -102,6 +117,23 @@ struct MyBookingsView: View {
     private func bookingsList(_ viewModel: BookingsViewModel) -> some View {
         ScrollView {
             LazyVStack(spacing: Spacing.md) {
+                ForEach(viewModel.displayedCourtBookings) { booking in
+                    NavigationLink(value: booking) {
+                        CourtBookingRowCard(
+                            booking: booking,
+                            displayStatus: booking.displayStatus(now: viewModel.now),
+                            showsChevron: true
+                        )
+                    }
+                    .buttonStyle(BookingCardPressStyle())
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .bottom)),
+                            removal: .opacity.combined(with: .scale(scale: 0.96))
+                        )
+                    )
+                }
+
                 ForEach(viewModel.displayedBookings) { booking in
                     BookingRowCard(
                         booking: booking,
@@ -110,9 +142,7 @@ struct MyBookingsView: View {
                             && booking.isUpcoming(now: viewModel.now),
                         isCancelling: viewModel.isCancelling
                             && viewModel.bookingPendingCancel?.id == booking.id,
-                        onCancel: {
-                            viewModel.requestCancel(booking)
-                        }
+                        onCancel: { viewModel.requestCancel(booking) }
                     )
                     .transition(
                         .asymmetric(
@@ -135,48 +165,23 @@ struct MyBookingsView: View {
     private func emptyState(for segment: BookingsSegment) -> some View {
         let config = emptyConfig(for: segment)
 
-        return VStack(spacing: Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(SBColor.chipBackground)
-                    .frame(width: 88, height: 88)
-
-                Image(systemName: config.symbol)
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(SBColor.textTertiary)
-                    .symbolRenderingMode(.hierarchical)
-            }
-
-            Text(config.title)
-                .sbFontHeadline()
-
-            Text(config.message)
-                .sbFontBody()
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Spacing.xxl)
-
-            if segment == .upcoming {
-                Button {
-                    appNavigation.openHome()
-                } label: {
-                    Text("Browse experiences")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(SBColor.primary)
-                }
-                .padding(.top, Spacing.xs)
-            }
-        }
-        .padding(.bottom, Spacing.xxxl)
-        .accessibilityElement(children: .combine)
+        return EmptyStateView(
+            systemImage: config.symbol,
+            title: config.title,
+            message: config.message,
+            actionTitle: segment == .upcoming ? "Discover clubs" : nil,
+            action: segment == .upcoming ? { appNavigation.openHome() } : nil
+        )
+        .padding(.bottom, Spacing.xxl)
     }
 
     private func emptyConfig(for segment: BookingsSegment) -> (symbol: String, title: String, message: String) {
         switch segment {
         case .upcoming:
             return (
-                "calendar.badge.plus",
+                "sportscourt",
                 "No upcoming bookings",
-                "Reserve a slot and it will appear here with the time and details."
+                "Book a court and it will appear here with the time and reference code."
             )
         case .past:
             return (
@@ -208,7 +213,108 @@ struct MyBookingsView: View {
     }
 }
 
-// MARK: - Row card
+// MARK: - Press style
+
+private struct BookingCardPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Court row card
+
+struct CourtBookingRowCard: View {
+    let booking: CourtBooking
+    var displayStatus: BookingDisplayStatus
+    /// List mode shows a chevron; detail owns cancel.
+    var showsChevron: Bool = false
+
+    private var accent: Color {
+        if let club = MockData.club(id: booking.clubId) {
+            return club.primaryColor.swiftUIColor
+        }
+        return SBColor.success
+    }
+
+    private var clubImageName: String {
+        MockData.club(id: booking.clubId)?.imageName ?? "figure.badminton"
+    }
+
+    var body: some View {
+        CardView(padding: Spacing.md, cornerRadius: Radius.lg) {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                artwork
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(booking.clubName ?? "Court booking")
+                            .sbFontHeadline()
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+
+                        Spacer(minLength: Spacing.xs)
+
+                        BookingStatusBadge(status: displayStatus)
+                    }
+
+                    Text(booking.dateTimeLabel())
+                        .sbFontCaption()
+                        .lineLimit(2)
+
+                    HStack(spacing: Spacing.xs) {
+                        Label(booking.durationLabel, systemImage: "hourglass")
+                        Text("·")
+                            .foregroundStyle(SBColor.textTertiary)
+                        Text(booking.referenceCode)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(SBColor.textTertiary)
+                    .padding(.top, 2)
+                }
+
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SBColor.textTertiary)
+                        .padding(.top, 4)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(booking.clubName ?? "Court"), \(booking.dateTimeLabel()), \(booking.durationLabel), \(displayStatus.title), reference \(booking.referenceCode)"
+        )
+        .accessibilityHint(showsChevron ? "Opens booking details" : "")
+    }
+
+    private var artwork: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [accent.opacity(0.92), accent.opacity(0.48)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Image(systemName: clubImageName)
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(.white)
+                .symbolRenderingMode(.hierarchical)
+        }
+        .frame(width: 56, height: 56)
+        .opacity(displayStatus == .cancelled ? 0.55 : 1)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Marketplace row card
 
 struct BookingRowCard: View {
     let booking: Booking
@@ -237,7 +343,7 @@ struct BookingRowCard: View {
                         Text(booking.dateTimeLabel())
                             .sbFontCaption()
 
-                        Text(booking.referenceCode)
+                        Text("\(booking.durationLabel) · \(booking.referenceCode)")
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(SBColor.textTertiary)
                             .padding(.top, 2)
@@ -299,55 +405,53 @@ struct BookingRowCard: View {
 
 // MARK: - Previews
 
-#Preview("My Bookings — Seeded Light") {
+#Preview("My Bookings — Court seeded") {
     let store = BookingStore()
-    store.seedPreviewData()
+    store.seedCourtPreviewData()
 
     return MyBookingsView()
         .bookingStore(store)
         .appNavigation(AppNavigation())
+        .themeManager(ThemeManager())
 }
 
 #Preview("My Bookings — Empty") {
     MyBookingsView()
         .bookingStore(BookingStore())
         .appNavigation(AppNavigation())
+        .themeManager(ThemeManager())
 }
 
 #Preview("My Bookings — Dark") {
     let store = BookingStore()
-    store.seedPreviewData()
+    store.seedCourtPreviewData()
 
     return MyBookingsView()
         .bookingStore(store)
         .appNavigation(AppNavigation())
+        .themeManager(ThemeManager())
         .preferredColorScheme(.dark)
 }
 
-#Preview("Booking Card — Upcoming") {
-    let store = BookingStore()
-    store.seedPreviewData()
-    let booking = store.upcomingBookings().first!
+#Preview("Court card") {
+    let start = Date().addingTimeInterval(86_400)
+    let booking = CourtBooking.make(
+        clubId: MockData.torontoClubId,
+        clubName: "Toronto Badminton Club",
+        courtId: UUID(),
+        courtNumber: 3,
+        slotId: UUID(),
+        start: start,
+        end: start.addingTimeInterval(3_600),
+        durationMinutes: 60,
+        guestName: "Alex",
+        phoneDigits: "5551234567"
+    )
 
-    return BookingRowCard(
+    return CourtBookingRowCard(
         booking: booking,
         displayStatus: .upcoming,
-        showsCancel: true,
-        onCancel: {}
-    )
-    .padding()
-    .background(SBColor.background)
-}
-
-#Preview("Booking Card — Past") {
-    let store = BookingStore()
-    store.seedPreviewData()
-    let booking = store.pastBookings().first!
-
-    return BookingRowCard(
-        booking: booking,
-        displayStatus: booking.displayStatus(),
-        showsCancel: false
+        showsChevron: true
     )
     .padding()
     .background(SBColor.background)

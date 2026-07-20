@@ -12,6 +12,9 @@ struct BookingsSegmentControl: View {
     var upcomingCount: Int = 0
     var pastCount: Int = 0
 
+    @Environment(\.themeManager) private var themeManager
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         HStack(spacing: Spacing.xxs) {
             ForEach(BookingsSegment.allCases) { segment in
@@ -30,6 +33,8 @@ struct BookingsSegmentControl: View {
     private func segmentButton(_ segment: BookingsSegment) -> some View {
         let isSelected = selection == segment
         let count = segment == .upcoming ? upcomingCount : pastCount
+        let primary = themeManager.primary(for: colorScheme)
+        let muted = themeManager.primaryMuted(for: colorScheme)
 
         return Button {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
@@ -43,12 +48,12 @@ struct BookingsSegmentControl: View {
                 if count > 0 {
                     Text("\(count)")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(isSelected ? SBColor.primary : SBColor.textTertiary)
+                        .foregroundStyle(isSelected ? primary : SBColor.textTertiary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
                             Capsule()
-                                .fill(isSelected ? SBColor.primaryMuted : SBColor.card.opacity(0.7))
+                                .fill(isSelected ? muted : SBColor.card.opacity(0.7))
                         )
                 }
             }
